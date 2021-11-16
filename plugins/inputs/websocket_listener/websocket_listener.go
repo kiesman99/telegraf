@@ -1,4 +1,4 @@
-package watch_websocket
+package websocket_listener
 
 import (
 	"fmt"
@@ -13,22 +13,22 @@ import (
 
 var upgrader = websocket.Upgrader{}
 
-type WatchWebsocketConsumer struct {
+type WebsocketConsumer struct {
 	Port        int `toml:"port"`
 	parser      parsers.Parser
 	accumulator telegraf.Accumulator
 	Log         telegraf.Logger
 }
 
-func (w *WatchWebsocketConsumer) SetParser(parser parsers.Parser) {
+func (w *WebsocketConsumer) SetParser(parser parsers.Parser) {
 	w.parser = parser
 }
 
-func (w *WatchWebsocketConsumer) Description() string {
-	return "Simple Websocket Server that should be "
+func (w *WebsocketConsumer) Description() string {
+	return "Plugin to listen to an establised WebSocket server or create one to publish and listen to."
 }
 
-func (w *WatchWebsocketConsumer) SampleConfig() string {
+func (w *WebsocketConsumer) SampleConfig() string {
 	return `
 	## Port which will be used for the server
 	# port = 3210
@@ -41,15 +41,15 @@ func (w *WatchWebsocketConsumer) SampleConfig() string {
 	`
 }
 
-func (w *WatchWebsocketConsumer) Gather(_ telegraf.Accumulator) error {
+func (w *WebsocketConsumer) Gather(_ telegraf.Accumulator) error {
 	return nil
 }
 
-func (w *WatchWebsocketConsumer) Init() error {
+func (w *WebsocketConsumer) Init() error {
 	return nil
 }
 
-func (w *WatchWebsocketConsumer) watchDataGatherer(writer http.ResponseWriter, req *http.Request) {
+func (w *WebsocketConsumer) dataGatherer(writer http.ResponseWriter, req *http.Request) {
 	c, err := upgrader.Upgrade(writer, req, nil)
 	if err != nil {
 		fmt.Errorf("upgrade: %v", err)
@@ -77,7 +77,7 @@ func (w *WatchWebsocketConsumer) watchDataGatherer(writer http.ResponseWriter, r
 	}
 }
 
-func (w *WatchWebsocketConsumer) Start(acc telegraf.Accumulator) error {
+func (w *WebsocketConsumer) Start(acc telegraf.Accumulator) error {
 	w.accumulator = acc
 	err := w.startServer()
 	if err != nil {
@@ -87,13 +87,13 @@ func (w *WatchWebsocketConsumer) Start(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (w *WatchWebsocketConsumer) Stop() {
+func (w *WebsocketConsumer) Stop() {
 	// Clean up
 }
 
-func (w *WatchWebsocketConsumer) startServer() error {
+func (w *WebsocketConsumer) startServer() error {
 	w.Log.Info("Starting Websocket Server")
-	http.HandleFunc("/watch", w.watchDataGatherer)
+	http.HandleFunc("/watch", w.dataGatherer)
 	go func() {
 		log.Fatal(http.ListenAndServe(":3210", nil))
 	}()
@@ -101,14 +101,14 @@ func (w *WatchWebsocketConsumer) startServer() error {
 	return nil
 }
 
-func NewWatchWebsocketConsumer() *WatchWebsocketConsumer {
+func NewWebsocketConsumer() *WebsocketConsumer {
 	parser, _ := parsers.NewInfluxParser()
 
-	return &WatchWebsocketConsumer{
+	return &WebsocketConsumer{
 		parser: parser,
 	}
 }
 
 func init() {
-	inputs.Add("watch_websocket", func() telegraf.Input { return NewWatchWebsocketConsumer() })
+	inputs.Add("websocket_listener", func() telegraf.Input { return NewWebsocketConsumer() })
 }
