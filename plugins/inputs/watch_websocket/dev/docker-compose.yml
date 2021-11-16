@@ -1,0 +1,26 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  influxdb:
+    image: influxdb:1.8
+    ports:
+      - "8086:8086"
+
+  chronograf:
+    image: chronograf:latest
+    # volumes:
+    #   # Mount for chronograf database
+    #   - ./chronograf/data/:/var/lib/chronograf/
+    ports:
+      # The WebUI for Chronograf is served on port 8888
+      - "8888:8888"
+    depends_on:
+      - influxdb
+  
+  mqtt:
+    image: eclipse-mosquitto
+    volumes:
+      - ./:/mosquitto/config/
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+      
