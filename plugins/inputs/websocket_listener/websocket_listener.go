@@ -1,9 +1,11 @@
 package websocket_listener
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/influxdata/telegraf"
@@ -14,10 +16,11 @@ import (
 var upgrader = websocket.Upgrader{}
 
 type WebsocketConsumer struct {
-	Port        int `toml:"port"`
-	parser      parsers.Parser
-	accumulator telegraf.Accumulator
-	Log         telegraf.Logger
+	ServiceAddress string `toml:"service_address"`
+	parser         parsers.Parser
+	accumulator    telegraf.Accumulator
+	Log            telegraf.Logger
+	server         *http.Server
 }
 
 func (w *WebsocketConsumer) SetParser(parser parsers.Parser) {
@@ -79,26 +82,32 @@ func (w *WebsocketConsumer) dataGatherer(writer http.ResponseWriter, req *http.R
 
 func (w *WebsocketConsumer) Start(acc telegraf.Accumulator) error {
 	w.accumulator = acc
-	err := w.startServer()
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
+	w.server = w.startServer()
 	return nil
 }
 
 func (w *WebsocketConsumer) Stop() {
-	// Clean up
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	w.Log.Info("Shutting down server")
+	if err := w.server.Shutdown(ctx); err != nil {
+		log.Fatalf("Error shutting down websocket_listener server, %v", err)
+	}
 }
 
-func (w *WebsocketConsumer) startServer() error {
+func (w *WebsocketConsumer) startServer() *http.Server {
+	// TODO: Extract port from w.ServerAddress
 	w.Log.Info("Starting Websocket Server")
-	http.HandleFunc("/watch", w.dataGatherer)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/watch", w.dataGatherer)
+
+	server := http.Server{Addr: ":3210", Handler: mux}
+
 	go func() {
-		log.Fatal(http.ListenAndServe(":3210", nil))
+		log.Fatal(server.ListenAndServe())
 	}()
 
-	return nil
+	return &server
 }
 
 func NewWebsocketConsumer() *WebsocketConsumer {

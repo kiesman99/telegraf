@@ -1026,7 +1026,7 @@
 
 
 # Simple Websocket Server that should be 
-[[inputs.watch_websocket]]
+[[inputs.websocket_listener]]
 	## Port which will be used for the server
 	# port = 3210
 
