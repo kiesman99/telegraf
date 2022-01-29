@@ -2,7 +2,6 @@ package websocket_listener
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/gorilla/websocket"
 	"github.com/influxdata/telegraf"
@@ -10,14 +9,13 @@ import (
 	"github.com/influxdata/telegraf/plugins/parsers"
 )
 
-var upgrader = websocket.Upgrader{}
-
 type WebsocketConsumer struct {
 	ServiceAddress string `toml:"service_address"`
 	parser         parsers.Parser
 	accumulator    telegraf.Accumulator
 	Log            telegraf.Logger
 	Conn           *websocket.Conn
+	CloseSignal    chan struct{}
 }
 
 func (w *WebsocketConsumer) SetParser(parser parsers.Parser) {
@@ -25,13 +23,13 @@ func (w *WebsocketConsumer) SetParser(parser parsers.Parser) {
 }
 
 func (w *WebsocketConsumer) Description() string {
-	return "Plugin to listen to an establised WebSocket server or create one to publish and listen to."
+	return "Plugin to connect to an establised WebSocket server and listens for incoming metrics."
 }
 
 func (w *WebsocketConsumer) SampleConfig() string {
 	return `
-	## Port which will be used for the server
-	# port = 3210
+	## Address of the server to connect to
+	service_address = "ws://localhost:3210/telegraf"
 
 	## Data format to consume.
 	## Each data format has its own unique set of configuration options, read
@@ -49,34 +47,6 @@ func (w *WebsocketConsumer) Init() error {
 	return nil
 }
 
-// func (w *WebsocketConsumer) dataGatherer(writer http.ResponseWriter, req *http.Request) {
-// 	c, err := upgrader.Upgrade(writer, req, nil)
-// 	if err != nil {
-// 		fmt.Errorf("upgrade: %v", err)
-// 		return
-// 	}
-// 	defer c.Close()
-// 	for {
-// 		_, message, err := c.ReadMessage()
-// 		if err != nil {
-// 			fmt.Errorf("error reading message: %v", err)
-// 			break
-// 		}
-
-// 		metrics, err := w.parser.Parse(message)
-// 		if err != nil {
-// 			fmt.Errorf("error parsing metrics: %v", err)
-// 			break
-// 		}
-
-// 		for _, m := range metrics {
-// 			w.accumulator.AddMetric(m)
-// 		}
-
-// 		w.Log.Infof("recv: %s", message)
-// 	}
-// }
-
 func (w *WebsocketConsumer) Start(acc telegraf.Accumulator) error {
 	w.accumulator = acc
 	w.Conn = w.connectToServer()
@@ -84,45 +54,27 @@ func (w *WebsocketConsumer) Start(acc telegraf.Accumulator) error {
 }
 
 func (w *WebsocketConsumer) Stop() {
-	// TODO: Close connection here
-
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
-	// w.Log.Info("Shutting down server")
-	// if err := w.server.Shutdown(ctx); err != nil {
-	// 	log.Fatalf("Error shutting down websocket_listener server, %v", err)
-	// }
+	w.Log.Info("Closing connection")
+	w.CloseSignal <- struct{}{}
+	close(w.CloseSignal)
 }
 
 func (w *WebsocketConsumer) connectToServer() *websocket.Conn {
-	// TODO: Extract port from w.ServerAddress
-	// w.Log.Info("Starting Websocket Server")
-	// mux := http.NewServeMux()
-	// mux.HandleFunc("/watch", w.dataGatherer)
+	w.Log.Infof("Connecting to %s\n", w.ServiceAddress)
 
-	// server := http.Server{Addr: ":3210", Handler: mux}
-
-	// go func() {
-	// 	log.Fatal(server.ListenAndServe())
-	// }()
-
-	w.Log.Info("ConnectToServer Invoked")
-
-	c, _, err := websocket.DefaultDialer.Dial("ws://host.docker.internal:3210/telegraf", nil)
+	c, _, err := websocket.DefaultDialer.Dial(w.ServiceAddress, nil)
 	if err != nil {
-		log.Fatal("dial:", err)
+		w.Log.Errorf("error dialing %v\n", err)
 	}
 
 	go func() {
-		w.Log.Info("Start Listening")
+		w.Log.Infof("Start Listening to %s\n", w.ServiceAddress)
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
 				w.Log.Errorf("error reading message: %v", err)
 				continue
 			}
-
-			fmt.Printf("Received: %s\n", string(message))
 
 			metrics, err := w.parser.Parse(message)
 			if err != nil {
@@ -134,8 +86,13 @@ func (w *WebsocketConsumer) connectToServer() *websocket.Conn {
 				w.accumulator.AddMetric(m)
 			}
 
-			w.Log.Infof("recv: %s", message)
+			w.Log.Debugf("recv: %s", message)
 		}
+	}()
+
+	go func() {
+		<-w.CloseSignal
+		w.Conn.Close()
 	}()
 
 	return c
@@ -144,11 +101,12 @@ func (w *WebsocketConsumer) connectToServer() *websocket.Conn {
 func NewWebsocketConsumer() *WebsocketConsumer {
 	parser, err := parsers.NewInfluxParser()
 	if err != nil {
-		fmt.Println("Error creating Parser: %v", err)
+		fmt.Printf("Error creating Parser: %v\n", err)
 	}
 
 	return &WebsocketConsumer{
-		parser: parser,
+		parser:      parser,
+		CloseSignal: make(chan struct{}),
 	}
 }
 
